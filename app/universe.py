@@ -14,7 +14,6 @@ KIS 계정 하나로 통일되고, 로그인 절차도 따로 필요 없다.
 
 from __future__ import annotations
 
-import ssl
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -68,10 +67,12 @@ class UniverseError(RuntimeError):
 
 
 def _download_master_bytes() -> bytes:
-    ctx = ssl._create_unverified_context()
+    # KIS 공식 예제는 ssl._create_unverified_context()로 인증서 검증을 꺼버리는데
+    # (중간자 공격에 취약해짐), 직접 테스트해보니 정상 검증으로도 문제없이 받아져서
+    # 검증을 켜둔 채로 쓴다.
     req = urllib.request.Request(MASTER_URL, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             zip_bytes = resp.read()
     except Exception as e:  # noqa: BLE001
         raise UniverseError(f"종목마스터 파일 다운로드 실패: {e}") from e

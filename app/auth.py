@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 import streamlit as st
 
 from app.secrets_util import get_secret
@@ -23,7 +25,9 @@ def require_login() -> None:
     st.title("🔒 BNF 매매법")
     pw = st.text_input("비밀번호", type="password")
     if st.button("입장"):
-        if pw == correct_password:
+        # ==로 바로 비교하면 문자 하나씩 비교 시간 차이로 비밀번호를 추측당할 여지가
+        # 아주 미세하게 있어서(타이밍 공격), 그런 차이가 안 나는 비교 방식을 쓴다.
+        if hmac.compare_digest(pw, correct_password):
             st.session_state["authenticated"] = True
             st.rerun()
         else:
