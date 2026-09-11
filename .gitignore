@@ -1,0 +1,17 @@
+# 비밀 정보 - 절대 깃에 올리지 않는다
+.env
+credentials.json
+token.json
+
+# 임시 작업 공간 - 통째로 지워도 되는 폴더
+.tmp/
+
+# 파이썬 캐시/가상환경
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS 잡파일
+.DS_Store
+Thumbs.db
