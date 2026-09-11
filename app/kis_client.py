@@ -36,7 +36,6 @@ class KISAPIError(RuntimeError):
 @dataclass
 class CurrentPrice:
     ticker: str
-    name: str
     price: float
     change_pct: float  # 전일 대비 등락률(%)
 
@@ -101,9 +100,10 @@ def get_current_price(ticker: str) -> CurrentPrice:
     output = resp.json().get("output", {})
     if not output:
         raise KISAPIError(f"현재가 조회 응답이 비어 있습니다 ({ticker}): {resp.text}")
+    # 참고: 이 API는 종목명을 안 준다(업종명만 줌). 이름이 필요하면
+    # app.universe.get_stock_name() 이나, 이미 알고 있는 이름(스캔 결과 등)을 쓸 것.
     return CurrentPrice(
         ticker=ticker,
-        name=output.get("hts_kor_isnm", ticker),
         price=float(output.get("stck_prpr", 0)),
         change_pct=float(output.get("prdy_ctrt", 0)),
     )

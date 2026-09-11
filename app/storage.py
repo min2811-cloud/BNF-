@@ -11,6 +11,14 @@
    "편집자"로 공유한다.
 3. Streamlit Secrets에 [gcp_service_account] 섹션으로 JSON 내용을,
    GSHEET_SPREADSHEET_ID 로 그 스프레드시트의 URL 속 ID를 넣는다.
+
+주의: "005930" 같은 종목코드는 앞자리 0이 아주 중요한데, 구글시트가 기본적으로
+숫자처럼 생긴 문자열을 멋대로 숫자로 바꿔버린다 — 저장할 때(value_input_option을
+USER_ENTERED로 하면 시트 자체가 숫자로 저장해버림, 그러면 "005930"이 5930이 됨)와
+읽을 때(gspread의 get_all_records가 다시 한번 숫자로 변환) 두 군데 다 문제가 될 수
+있어서, 쓸 때는 "RAW"로(시트가 임의로 해석 못 하게), 읽을 때는
+numericise_ignore=["all"]로(gspread가 임의로 해석 못 하게) 막아뒀다. 숫자가 필요한
+곳은 호출하는 쪽에서 직접 float()/int()로 변환한다.
 """
 
 from __future__ import annotations
@@ -96,13 +104,13 @@ def _holdings_ws():
 
 def has_recommendation_today() -> bool:
     today = date.today().isoformat()
-    records = _recommendations_ws().get_all_records()
+    records = _recommendations_ws().get_all_records(numericise_ignore=["all"])
     return any(r.get("date") == today for r in records)
 
 
 def get_today_recommendation() -> list[dict]:
     today = date.today().isoformat()
-    records = _recommendations_ws().get_all_records()
+    records = _recommendations_ws().get_all_records(numericise_ignore=["all"])
     return [r for r in records if r.get("date") == today]
 
 
@@ -114,13 +122,13 @@ def save_recommendation(universe: list) -> None:
         [today, u.ticker, u.name, u.market_cap_rank, today]
         for u in universe
     ]
-    ws.append_rows(rows, value_input_option="USER_ENTERED")
+    ws.append_rows(rows, value_input_option="RAW")
 
 
 # ---------- 보유 종목 ----------
 
 def get_active_holdings() -> list[dict]:
-    records = _holdings_ws().get_all_records()
+    records = _holdings_ws().get_all_records(numericise_ignore=["all"])
     return [r for r in records if r.get("status") == "active"]
 
 
@@ -147,7 +155,7 @@ def add_holding(
             "",
             "",
         ],
-        value_input_option="USER_ENTERED",
+        value_input_option="RAW",
     )
     return holding_id
 

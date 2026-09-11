@@ -26,7 +26,10 @@ def render() -> None:
 
     todays = storage.get_today_recommendation()
     if todays:
-        df = pd.DataFrame(todays).sort_values("market_cap_rank")
+        df = pd.DataFrame(todays)
+        # 구글시트에서는 전부 문자열로 읽어오므로(종목코드 보호용) 정렬용으로만 숫자 변환
+        df["market_cap_rank"] = pd.to_numeric(df["market_cap_rank"])
+        df = df.sort_values("market_cap_rank")
         df = df.rename(
             columns={"market_cap_rank": "시총순위", "name": "종목명", "ticker": "종목코드"}
         )

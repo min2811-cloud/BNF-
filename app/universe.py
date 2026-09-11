@@ -106,14 +106,20 @@ def _parse_master(raw_bytes: bytes) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=60 * 60 * 12, show_spinner=False)
+def _get_master_df() -> pd.DataFrame:
+    """종목마스터 전체(약 2,580개 코스피 종목)를 파싱해서 캐시. 하루 12시간 캐시라
+    유니버스 산정과 종목명 조회가 같은 다운로드 결과를 공유한다."""
+    df = _parse_master(_download_master_bytes())
+    df["시가총액_num"] = pd.to_numeric(df["시가총액"], errors="coerce")
+    return df
+
+
 def get_top_market_cap_universe(top_n: int = config.TOP_N) -> list[UniverseStock]:
     """코스피 시가총액 상위 top_n 종목을 순위와 함께 반환.
 
     우선주/SPAC/관리종목/거래정지/정리매매 종목은 "우량주 매매"에 부적합해서 제외한다.
     """
-    df = _parse_master(_download_master_bytes())
-
-    df["시가총액_num"] = pd.to_numeric(df["시가총액"], errors="coerce")
+    df = _get_master_df()
     df = df.dropna(subset=["시가총액_num"])
     df = df[
         (df["우선주"] == "0")
@@ -128,3 +134,13 @@ def get_top_market_cap_universe(top_n: int = config.TOP_N) -> list[UniverseStock
         UniverseStock(ticker=row["단축코드"], name=row["한글명"], market_cap_rank=rank)
         for rank, (_, row) in enumerate(df.iterrows(), start=1)
     ]
+
+
+def get_stock_name(ticker: str) -> str | None:
+    """종목코드로 한글 종목명을 찾는다. KIS 현재가 조회 API는 종목명을 안 주기 때문에
+    (업종명만 줌), "직접 종목 추가" 같은 유니버스 밖 종목의 이름을 채울 때 쓴다."""
+    df = _get_master_df()
+    match = df[df["단축코드"] == ticker]
+    if match.empty:
+        return None
+    return str(match.iloc[0]["한글명"])

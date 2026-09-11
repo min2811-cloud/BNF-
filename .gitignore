@@ -5,6 +5,10 @@ token.json
 .streamlit/secrets.toml
 *serviceaccount*.json
 *service-account*.json
+# 구글 클라우드 콘솔이 내려주는 서비스 계정 키는 "프로젝트ID-해시.json" 형태라
+# 이름만으로는 못 걸러서, 저장소 최상위에 있는 .json 파일은 통째로 막는다
+# (다른 정상 데이터 파일은 app/ 안에 두거나 이 규칙에서 빼면 됨)
+/*.json
 
 # 임시 작업 공간 - 통째로 지워도 되는 폴더
 .tmp/

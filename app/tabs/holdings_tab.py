@@ -4,7 +4,7 @@ from datetime import date
 
 import streamlit as st
 
-from app import config, indicators, kis_client, storage
+from app import config, indicators, kis_client, storage, universe
 
 
 def add_holding_form(
@@ -45,7 +45,7 @@ def add_holding_form(
 
     with st.spinner("손절선 계산 중..."):
         try:
-            name = default_name or kis_client.get_current_price(ticker).name
+            name = default_name or universe.get_stock_name(ticker) or ticker
             daily_df = kis_client.get_daily_ohlcv(ticker)
             stop_loss_price = (
                 default_stop_loss
