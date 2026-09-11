@@ -1,0 +1,7 @@
+streamlit>=1.35
+pandas
+numpy
+ta
+requests
+gspread
+google-auth

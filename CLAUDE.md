@@ -10,6 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 사용자는 코드를 쓰지 않고 기술 용어를 다 알지 못한다. **터미널을 한 번도 만져본 적 없는 사장한테 설명하듯이** 말할 것. 결정이 필요하면 결정에 필요한 것만 주고, 강의하지 말 것. 한국어로 응답.
 
+## BNF 매매법 앱 (`app/`)
+
+우량 대형주 저점매수 보조용 Streamlit 웹앱은 이 프로젝트의 나머지 부분(workflows/tools 자동화 패턴)과 성격이 달라 별도 폴더로 분리했다. 상시 구동되는 앱이고 실행 중 Claude를 호출하지 않는다(=토큰 비용 없음). 자세한 내용은 [app/README.md](app/README.md) 참고.
+
 ## 현재 상태
 
 리포지토리는 아직 뼈대만 있다. 지금 존재하는 파일은 이 문서 하나뿐이고 `workflows/`, `tools/`, `.env` 등은 아직 없다. 작업을 시작하면서 아래 구조대로 만들어 나간다. git 리포지토리도 아직 초기화되지 않음.
