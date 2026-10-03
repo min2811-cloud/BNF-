@@ -11,7 +11,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from app import config, kis_client, storage, trading_days, universe
+from app import config, indicators, kis_client, storage, trading_days, universe
 from app.config import now_kst, today_kst
 from app.tabs.holdings_tab import add_holding_form
 
@@ -36,6 +36,39 @@ def _show_market_note(kospi_change_pct: float | None) -> None:
         st.warning(f"{badge}  \n{note}")
 
 
+def _indicators_for(ticker: str) -> dict:
+    """BNF 원래 지표(이격도·RSI·MACD). 사장님 규칙에는 안 쓰지만 참고용으로 같이 보여준다.
+    일봉 조회가 무거운 호출이라 급락 종목에만 쓴다. 실패하면 빈 값."""
+    try:
+        snap = indicators.build_snapshot(kis_client.get_daily_ohlcv(ticker))
+    except Exception:  # noqa: BLE001
+        return {}
+    return {
+        "disparity": round(snap.disparity, 1),
+        "rsi": round(snap.rsi, 1),
+        "macd_hist": round(snap.macd_hist, 1),
+        "macd_just_turned": "Y" if snap.macd_just_turned_positive else "N",
+        "bnf_all_ok": "Y" if snap.all_conditions_met else "N",
+    }
+
+
+def _indicator_columns(r: dict) -> dict:
+    """표에 붙일 지표 칸. 구글시트에서 읽은 값(문자열)과 방금 계산한 값 둘 다 처리."""
+    def num(v):
+        return None if v in ("", None) else float(v)
+
+    disparity, rsi, macd = num(r.get("disparity")), num(r.get("rsi")), num(r.get("macd_hist"))
+    if disparity is None:
+        return {"BNF조건": "-", "이격도": "-", "RSI": "-", "MACD": "-"}
+    turned = " (방금 전환)" if r.get("macd_just_turned") == "Y" else ""
+    return {
+        "BNF조건": "✅ 충족" if r.get("bnf_all_ok") == "Y" else "❌",
+        "이격도": f"{disparity:.1f}",
+        "RSI": f"{rsi:.1f}",
+        "MACD": f"{macd:.0f}{turned}",
+    }
+
+
 def _run_scan() -> None:
     stocks = universe.get_top_market_cap_universe()
     progress = st.progress(0.0, text="급락 종목 찾는 중...")
@@ -52,6 +85,14 @@ def _run_scan() -> None:
         kis_client.sleep_between_calls()
         progress.progress((i + 1) / len(stocks), text=f"{i + 1}/{len(stocks)} 종목 확인 중...")
     progress.empty()
+
+    if found:
+        progress2 = st.progress(0.0, text="이격도·RSI·MACD 계산 중...")
+        for i, r in enumerate(found):
+            r.update(_indicators_for(r["ticker"]))
+            kis_client.sleep_between_calls()
+            progress2.progress((i + 1) / len(found), text=f"지표 {i + 1}/{len(found)} 계산 중...")
+        progress2.empty()
 
     kospi = kis_client.get_kospi_index_change_pct()
     storage.save_scan(found, kospi)
@@ -85,11 +126,16 @@ def _render_scan_step() -> None:
     df["_chg"] = pd.to_numeric(df["scan_change_pct"])
     df["등락률"] = df["_chg"].map(lambda v: f"{v:+.1f}%")
     df["가격"] = pd.to_numeric(df["scan_price"]).map(lambda v: f"{v:,.0f}원")
-    df = df.rename(columns={"name": "종목명", "ticker": "종목코드"})
+    ind = pd.DataFrame([_indicator_columns(r) for r in rows], index=df.index)
+    df = pd.concat([df, ind], axis=1).rename(columns={"name": "종목명", "ticker": "종목코드"})
     st.dataframe(
-        df.sort_values("_chg")[["종목명", "종목코드", "등락률", "가격"]],
+        df.sort_values("_chg")[["종목명", "종목코드", "등락률", "가격", "BNF조건", "이격도", "RSI", "MACD"]],
         hide_index=True,
         width="stretch",
+    )
+    st.caption(
+        f"BNF조건 = 이격도 {config.DISPARITY_BUY_MAX} 이하 + RSI {config.RSI_OVERSOLD} 미만 + MACD 양수. "
+        "사장님 규칙에는 안 쓰는 참고 정보예요."
     )
 
 
@@ -102,14 +148,17 @@ def _run_buy_check(rows: list[dict]) -> None:
         except Exception:
             cur = None
         if cur is not None:
+            still_down = cur.change_pct <= config.DROP_THRESHOLD_PCT
             targets.append(
                 {
+                    # 매수 대상만 지표를 지금 시점으로 다시 계산(장중에 값이 바뀌므로)
+                    **(_indicators_for(r["ticker"]) if still_down else {}),
                     "ticker": r["ticker"],
                     "name": r["name"],
                     "scan_change_pct": float(r["scan_change_pct"]),
                     "price": cur.price,
                     "change_pct": cur.change_pct,
-                    "still_down": cur.change_pct <= config.DROP_THRESHOLD_PCT,
+                    "still_down": still_down,
                 }
             )
         kis_client.sleep_between_calls()
@@ -171,6 +220,7 @@ def _render_buy_step() -> None:
                     "금액": f"{qty * t['price']:,.0f}원",
                     "손절가(-4%)": f"{t['price'] * (1 + config.STOP_LOSS_PCT / 100):,.0f}원",
                     "익절가(+10%)": f"{t['price'] * (1 + config.TAKE_PROFIT_PCT / 100):,.0f}원",
+                    **_indicator_columns(t),
                 }
             )
         st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch")

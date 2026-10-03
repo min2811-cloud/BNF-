@@ -43,6 +43,12 @@ SCAN_HEADERS = [
     "scan_change_pct",
     "kospi_change_pct",
     "scanned_at",
+    # BNF 지표(참고용, 2026-10-03 사장님 요청으로 유지)
+    "disparity",
+    "rsi",
+    "macd_hist",
+    "macd_just_turned",
+    "bnf_all_ok",
 ]
 HOLDING_HEADERS = [
     "id",
@@ -96,10 +102,16 @@ def _get_or_create_worksheet(sheet_name: str, headers: list[str]):
         ws = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=len(headers))
         ws.append_row(headers)
         return ws
-    if ws.row_values(1) != headers:
+    current = ws.row_values(1)
+    if current != headers:
         # 헤더가 없거나 다르면 맞춰준다 (기존 데이터는 건드리지 않음)
-        if not ws.row_values(1):
+        if not current:
             ws.append_row(headers)
+        elif headers[: len(current)] == current:
+            # 뒤에 컬럼만 새로 추가된 경우(예: scans에 지표 컬럼 추가) 헤더 줄만 늘린다
+            if ws.col_count < len(headers):
+                ws.add_cols(len(headers) - ws.col_count)
+            ws.update([headers], "A1")
     return ws
 
 
@@ -164,15 +176,16 @@ def has_scan_today() -> bool:
 
 
 def save_scan(rows: list[dict], kospi_change_pct: float | None) -> None:
-    """rows: {"ticker","name","price","change_pct"} 목록. 급락 종목이 0개여도
+    """rows: {"ticker","name","price","change_pct"(+ 지표 키들, 선택)} 목록. 급락 종목이 0개여도
     "오늘 스캔했음"을 남기기 위해 빈 줄(ticker 없음) 하나를 저장한다."""
     today = today_kst().isoformat()
     scanned_at = now_kst().strftime("%Y-%m-%d %H:%M:%S")
     kospi = "" if kospi_change_pct is None else kospi_change_pct
     values = [
         [today, r["ticker"], r["name"], r["price"], r["change_pct"], kospi, scanned_at]
+        + [r.get(k, "") for k in ("disparity", "rsi", "macd_hist", "macd_just_turned", "bnf_all_ok")]
         for r in rows
-    ] or [[today, "", "", "", "", kospi, scanned_at]]
+    ] or [[today, "", "", "", "", kospi, scanned_at, "", "", "", "", ""]]
     _scans_ws().append_rows(values, value_input_option="RAW")
 
 
