@@ -16,9 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 현재 상태
 
-리포지토리는 아직 뼈대만 있다. 지금 존재하는 파일은 이 문서 하나뿐이고 `workflows/`, `tools/`, `.env` 등은 아직 없다. 작업을 시작하면서 아래 구조대로 만들어 나간다. git 리포지토리도 아직 초기화되지 않음.
+git 저장소이며 `workflows/`, `tools/`, `app/`, `.env`가 모두 존재한다. 각 Workflow(`workflows/*.md`)에 실행할 Tool과 명령이 적혀 있으니 그쪽을 따른다.
 
-빌드/린트/테스트 명령은 아직 정의된 것이 없다. Tool은 파이썬으로 작성하며, 만들어지는 대로 이 문서에 실행·테스트 방법을 추가한다.
+공식 빌드/린트/테스트 파이프라인은 아직 없다. Tool은 `python -m tools.<파일명>`으로 직접 실행해서 확인한다.
 
 ## 아키텍처 — 생각과 실행의 분리
 
@@ -55,4 +55,5 @@ token.json          # OAuth 토큰 (gitignore)
 
 - 비밀은 오직 `.env`에만. Tool·Workflow·이 문서에는 절대 안 된다.
 - `.env`, `credentials.json`, `token.json`은 반드시 `.gitignore`에 포함.
+- `app/`은 다른 비밀 저장 방식을 쓴다(`.streamlit/secrets.toml`, `app/README.md` 참고) — 이것도 반드시 `.gitignore`에 포함(현재 포함됨, `.gitignore` 참고).
 - 배포 전 보안 점검: 노출된 키, 열린 엔드포인트, 공개되면 안 되는 것을 전부 찾는다.

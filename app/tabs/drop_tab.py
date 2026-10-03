@@ -1,121 +1,210 @@
+"""
+급락 스캔 탭 — 사장님 매매 규칙 2단계.
+
+① 오전 10시: 우량주 중 전일 대비 -5% 이하 종목을 찾아 구글시트(scans)에 저장
+② 오후 2시 50분: 저장해둔 종목만 다시 조회 -> 여전히 -5% 이하면 "매수 대상"
+   (수량 = 100만원 이내 최대, 1주가 넘으면 1주). 주문은 사장님이 증권사 앱에서 직접.
+"""
+
 from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
 
-from app import config, indicators, kis_client, universe
+from app import config, kis_client, storage, trading_days, universe
+from app.config import now_kst, today_kst
 from app.tabs.holdings_tab import add_holding_form
+
+
+def _market_badge(kospi_change_pct: float | None) -> str:
+    if kospi_change_pct is None:
+        return "코스피 등락률 확인 불가"
+    if kospi_change_pct <= config.MARKET_PANIC_KOSPI_DROP_PCT:
+        return f"✅ 시장 같이 하락 (코스피 {kospi_change_pct:+.2f}%)"
+    return f"⚠️ 혼자 하락 (코스피 {kospi_change_pct:+.2f}%)"
+
+
+def _show_market_note(kospi_change_pct: float | None) -> None:
+    badge = _market_badge(kospi_change_pct)
+    note = (
+        "백테스트(2~9월)에서는 코스피도 -1% 이상 같이 빠진 날 산 경우만 돈이 됐고, "
+        "그 종목만 혼자 빠진 날은 손실이었어요. 참고만 하세요."
+    )
+    if kospi_change_pct is not None and kospi_change_pct <= config.MARKET_PANIC_KOSPI_DROP_PCT:
+        st.success(f"{badge}  \n{note}")
+    else:
+        st.warning(f"{badge}  \n{note}")
 
 
 def _run_scan() -> None:
     stocks = universe.get_top_market_cap_universe()
-
-    # 1단계: 전 종목 현재가만 가볍게 조회해서 급락 후보를 거른다.
-    progress = st.progress(0.0, text="1단계: 급락 후보 찾는 중...")
-    candidates = []
+    progress = st.progress(0.0, text="급락 종목 찾는 중...")
+    found = []
     for i, s in enumerate(stocks):
         try:
             cur = kis_client.get_current_price(s.ticker)
             if cur.change_pct <= config.DROP_THRESHOLD_PCT:
-                candidates.append((s, cur))
+                found.append(
+                    {"ticker": s.ticker, "name": s.name, "price": cur.price, "change_pct": cur.change_pct}
+                )
         except Exception:
             pass  # 개별 종목 조회 실패는 건너뛴다 (전체 스캔을 막지 않음)
         kis_client.sleep_between_calls()
-        progress.progress((i + 1) / len(stocks), text=f"1단계: {i + 1}/{len(stocks)} 종목 확인 중...")
+        progress.progress((i + 1) / len(stocks), text=f"{i + 1}/{len(stocks)} 종목 확인 중...")
     progress.empty()
 
-    # 2단계: 후보 종목만 일봉을 조회해 지표 계산 (무거운 호출은 소수 종목만)
-    results = []
-    daily_cache: dict[str, pd.DataFrame] = {}
-    if candidates:
-        progress2 = st.progress(0.0, text="2단계: 지표 계산 중...")
-        for i, (s, cur) in enumerate(candidates):
-            try:
-                daily_df = kis_client.get_daily_ohlcv(s.ticker)
-                snap = indicators.build_snapshot(daily_df)
-                daily_cache[s.ticker] = daily_df
-                results.append(
-                    {
-                        "ticker": s.ticker,
-                        "name": s.name,
-                        "price": cur.price,
-                        "change_pct": cur.change_pct,
-                        "disparity": snap.disparity,
-                        "rsi": snap.rsi,
-                        "macd_hist": snap.macd_hist,
-                        "macd_just_turned": snap.macd_just_turned_positive,
-                        "all_ok": snap.all_conditions_met,
-                    }
-                )
-            except Exception:
-                pass
-            kis_client.sleep_between_calls()
-            progress2.progress(
-                (i + 1) / len(candidates), text=f"2단계: {i + 1}/{len(candidates)} 종목 확인 중..."
-            )
-        progress2.empty()
+    kospi = kis_client.get_kospi_index_change_pct()
+    storage.save_scan(found, kospi)
 
-    st.session_state["drop_results"] = results
-    st.session_state["drop_daily_cache"] = daily_cache
+
+def _render_scan_step() -> None:
+    st.subheader(f"① {config.SCAN_HOUR_LABEL} 급락 스캔")
+    st.caption(
+        f"우량주 중 전일 대비 {config.DROP_THRESHOLD_PCT:.0f}% 이하로 빠진 종목을 찾아서 저장해요. "
+        f"{config.BUY_CHECK_LABEL}에 이 목록을 다시 확인해요."
+    )
+    if st.button("급락 종목 찾기", type="primary", key="scan_btn"):
+        with st.spinner("스캔 중... (1분 정도 걸려요)"):
+            _run_scan()
+        st.rerun()
+
+    if not storage.has_scan_today():
+        st.caption("오늘은 아직 스캔하지 않았어요.")
+        return
+
+    rows = storage.get_today_scan()
+    if not rows:
+        st.info(f"오늘 스캔 결과, {config.DROP_THRESHOLD_PCT:.0f}% 이상 급락한 우량주가 없었어요.")
+        return
+
+    scanned_at = rows[0].get("scanned_at", "")
+    kospi_raw = rows[0].get("kospi_change_pct", "")
+    kospi = float(kospi_raw) if kospi_raw not in ("", None) else None
+    st.caption(f"스캔 시각: {scanned_at} · {_market_badge(kospi)}")
+    df = pd.DataFrame(rows)
+    df["_chg"] = pd.to_numeric(df["scan_change_pct"])
+    df["등락률"] = df["_chg"].map(lambda v: f"{v:+.1f}%")
+    df["가격"] = pd.to_numeric(df["scan_price"]).map(lambda v: f"{v:,.0f}원")
+    df = df.rename(columns={"name": "종목명", "ticker": "종목코드"})
+    st.dataframe(
+        df.sort_values("_chg")[["종목명", "종목코드", "등락률", "가격"]],
+        hide_index=True,
+        width="stretch",
+    )
+
+
+def _run_buy_check(rows: list[dict]) -> None:
+    targets = []
+    progress = st.progress(0.0, text="다시 확인 중...")
+    for i, r in enumerate(rows):
+        try:
+            cur = kis_client.get_current_price(r["ticker"])
+        except Exception:
+            cur = None
+        if cur is not None:
+            targets.append(
+                {
+                    "ticker": r["ticker"],
+                    "name": r["name"],
+                    "scan_change_pct": float(r["scan_change_pct"]),
+                    "price": cur.price,
+                    "change_pct": cur.change_pct,
+                    "still_down": cur.change_pct <= config.DROP_THRESHOLD_PCT,
+                }
+            )
+        kis_client.sleep_between_calls()
+        progress.progress((i + 1) / len(rows), text=f"{i + 1}/{len(rows)} 종목 확인 중...")
+    progress.empty()
+    st.session_state["buy_check"] = {
+        "date": today_kst().isoformat(),
+        "checked_at": now_kst().strftime("%H:%M"),
+        "kospi": kis_client.get_kospi_index_change_pct(),
+        "targets": targets,
+    }
+
+
+def _render_buy_step() -> None:
+    st.subheader(f"② {config.BUY_CHECK_LABEL} 매수 확인")
+    st.caption(
+        f"10시에 찾은 종목이 지금도 {config.DROP_THRESHOLD_PCT:.0f}% 이하면 매수 대상이에요. "
+        f"종목당 {config.BUY_BUDGET_WON:,}원 이내로, 1주가 그보다 비싸면 1주만."
+    )
+
+    rows = storage.get_today_scan()
+    if not rows:
+        st.caption("오늘 10시 스캔 결과가 없어서 확인할 종목이 없어요.")
+        return
+
+    if now_kst().hour < config.BUY_CHECK_HOUR:
+        st.info(f"아직 이른 시간이에요. 규칙상 확인은 {config.BUY_CHECK_LABEL}에 해요. (눌러볼 수는 있어요)")
+
+    if st.button("지금 매수 대상 확인", type="primary", key="buy_check_btn"):
+        with st.spinner("확인 중..."):
+            _run_buy_check(rows)
+
+    check = st.session_state.get("buy_check")
+    if not check or check["date"] != today_kst().isoformat():
+        return
+
+    st.caption(f"확인 시각: {check['checked_at']}")
+    _show_market_note(check["kospi"])
+
+    buys = [t for t in check["targets"] if t["still_down"]]
+    dropped = [t for t in check["targets"] if not t["still_down"]]
+    sell_by = trading_days.sell_by_date(today_kst())
+
+    if not buys:
+        st.info("지금은 매수 대상이 없어요. (10시 종목들이 -5% 위로 회복했어요)")
+    else:
+        st.markdown(f"**🛒 매수 대상 {len(buys)}종목** · 매도 예정일 **{sell_by:%m/%d}({'월화수목금토일'[sell_by.weekday()]})**")
+        total = 0.0
+        table = []
+        for t in sorted(buys, key=lambda x: x["change_pct"]):
+            qty = config.buy_quantity(t["price"])
+            total += qty * t["price"]
+            table.append(
+                {
+                    "종목명": t["name"],
+                    "지금 등락률": f"{t['change_pct']:+.1f}%",
+                    "현재가": f"{t['price']:,.0f}원",
+                    "수량": f"{qty}주",
+                    "금액": f"{qty * t['price']:,.0f}원",
+                    "손절가(-4%)": f"{t['price'] * (1 + config.STOP_LOSS_PCT / 100):,.0f}원",
+                    "익절가(+10%)": f"{t['price'] * (1 + config.TAKE_PROFIT_PCT / 100):,.0f}원",
+                }
+            )
+        st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch")
+        st.caption(f"전부 사면 약 {total:,.0f}원 필요해요. 손절가·익절가는 지금 가격 기준이고, 실제 체결가로 다시 계산돼요.")
+
+    if dropped:
+        with st.expander(f"회복해서 제외된 종목 {len(dropped)}개"):
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {"종목명": t["name"], "10시": f"{t['scan_change_pct']:+.1f}%", "지금": f"{t['change_pct']:+.1f}%"}
+                        for t in dropped
+                    ]
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+
+    if buys:
+        st.divider()
+        st.markdown("**증권사 앱에서 샀으면 보유 종목으로 등록하세요**")
+        options = {f"{t['name']} ({t['ticker']})": t for t in buys}
+        picked = options[st.selectbox("등록할 종목", list(options.keys()), key="buy_pick")]
+        add_holding_form(
+            key_prefix=f"drop_{picked['ticker']}",
+            default_ticker=picked["ticker"],
+            default_name=picked["name"],
+            default_price=picked["price"],
+            lock_ticker=True,
+        )
 
 
 def render() -> None:
-    st.header("📉 급락 스캔")
-    st.caption(
-        f"우량주 중 전일 대비 {config.DROP_THRESHOLD_PCT:.0f}% 이상 급락한 종목을 찾아서, "
-        "이격도·RSI·MACD 조건을 확인해드려요."
-    )
-
-    if st.button("급락 종목 찾기", type="primary"):
-        with st.spinner("스캔 준비 중..."):
-            _run_scan()
-
-    results = st.session_state.get("drop_results")
-    if results is None:
-        st.caption("아직 스캔하지 않았어요. 위 버튼을 눌러주세요.")
-        return
-    if not results:
-        st.info(f"오늘은 {config.DROP_THRESHOLD_PCT:.0f}% 이상 급락한 우량주가 없어요.")
-        return
-
-    df = pd.DataFrame(results).sort_values(
-        ["all_ok", "change_pct"], ascending=[False, True]
-    )
-    display_df = df.copy()
-    display_df["매수조건"] = display_df["all_ok"].map({True: "✅ 충족", False: "❌"})
-    display_df["이격도"] = display_df["disparity"].map(lambda v: f"{v:.1f}")
-    display_df["RSI"] = display_df["rsi"].map(lambda v: f"{v:.1f}")
-    display_df["MACD히스토그램"] = display_df.apply(
-        lambda r: f"{r['macd_hist']:.0f}" + (" (방금 전환)" if r["macd_just_turned"] else ""),
-        axis=1,
-    )
-    display_df["현재가"] = display_df["price"].map(lambda v: f"{v:,.0f}원")
-    display_df["등락률"] = display_df["change_pct"].map(lambda v: f"{v:+.1f}%")
-    display_df["종목명"] = display_df["name"]
-    display_df["종목코드"] = display_df["ticker"]
-
-    st.dataframe(
-        display_df[
-            ["매수조건", "종목명", "종목코드", "현재가", "등락률", "이격도", "RSI", "MACD히스토그램"]
-        ],
-        hide_index=True,
-        use_container_width=True,
-    )
-
+    st.header("📉 급락 스캔 · 매수 확인")
+    _render_scan_step()
     st.divider()
-    st.subheader("보유 종목으로 등록")
-    ticker_options = {f"{r['name']} ({r['ticker']})": r for r in results}
-    picked_label = st.selectbox("등록할 종목을 골라주세요", list(ticker_options.keys()))
-    picked = ticker_options[picked_label]
-    daily_cache = st.session_state.get("drop_daily_cache", {})
-    daily_df = daily_cache.get(picked["ticker"])
-    default_stop_loss = (
-        indicators.calc_stop_loss_price(daily_df) if daily_df is not None else None
-    )
-    add_holding_form(
-        key_prefix="drop",
-        default_ticker=picked["ticker"],
-        default_name=picked["name"],
-        default_stop_loss=default_stop_loss,
-        lock_ticker=True,
-    )
+    _render_buy_step()

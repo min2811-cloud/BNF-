@@ -19,7 +19,7 @@ auth.require_login()
 st.title("📈 BNF 매매법")
 st.caption("우량 대형주 저점매수 보조 도구 — 신호만 보여줘요, 주문은 직접 하세요.")
 
-tab1, tab2, tab3 = st.tabs(["🏆 우량주 추천", "📉 급락 스캔", "💼 보유 종목"])
+tab1, tab2, tab3 = st.tabs(["🏆 우량주 추천", "📉 급락 스캔·매수", "💼 보유 종목"])
 
 with tab1:
     recommend_tab.render()

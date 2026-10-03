@@ -34,7 +34,7 @@ def render() -> None:
             columns={"market_cap_rank": "시총순위", "name": "종목명", "ticker": "종목코드"}
         )
         st.dataframe(
-            df[["시총순위", "종목명", "종목코드"]], hide_index=True, use_container_width=True
+            df[["시총순위", "종목명", "종목코드"]], hide_index=True, width="stretch"
         )
     else:
         st.caption("아직 오늘의 추천이 없어요. 위 버튼을 눌러주세요.")

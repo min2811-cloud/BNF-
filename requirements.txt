@@ -5,3 +5,4 @@ ta
 requests
 gspread
 google-auth
+holidays

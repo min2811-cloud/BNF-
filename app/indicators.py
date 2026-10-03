@@ -38,24 +38,37 @@ class IndicatorSnapshot:
         return self.disparity_ok and self.rsi_ok and self.macd_ok
 
 
-def calc_disparity(close: pd.Series, period: int = config.DISPARITY_MA_PERIOD) -> float:
+def calc_disparity_series(close: pd.Series, period: int = config.DISPARITY_MA_PERIOD) -> pd.Series:
+    """이격도를 날짜별로 전부 계산한 시리즈. 과거 특정일들을 한꺼번에 스캔할 때
+    (예: 백테스트) 날마다 calc_disparity()를 반복 호출하는 것보다 훨씬 빠르다."""
     ma = close.rolling(window=period).mean()
-    return float(close.iloc[-1] / ma.iloc[-1] * 100)
+    return close / ma * 100
 
 
-def calc_rsi(close: pd.Series, period: int = config.RSI_PERIOD) -> float:
-    rsi_series = ta.momentum.RSIIndicator(close, window=period).rsi()
-    return float(rsi_series.iloc[-1])
+def calc_rsi_series(close: pd.Series, period: int = config.RSI_PERIOD) -> pd.Series:
+    return ta.momentum.RSIIndicator(close, window=period).rsi()
 
 
-def calc_macd_hist(close: pd.Series) -> tuple[float, bool]:
+def calc_macd_hist_series(close: pd.Series) -> pd.Series:
     macd = ta.trend.MACD(
         close,
         window_fast=config.MACD_FAST,
         window_slow=config.MACD_SLOW,
         window_sign=config.MACD_SIGNAL,
     )
-    hist = macd.macd_diff()
+    return macd.macd_diff()
+
+
+def calc_disparity(close: pd.Series, period: int = config.DISPARITY_MA_PERIOD) -> float:
+    return float(calc_disparity_series(close, period).iloc[-1])
+
+
+def calc_rsi(close: pd.Series, period: int = config.RSI_PERIOD) -> float:
+    return float(calc_rsi_series(close, period).iloc[-1])
+
+
+def calc_macd_hist(close: pd.Series) -> tuple[float, bool]:
+    hist = calc_macd_hist_series(close)
     current = float(hist.iloc[-1])
     previous = float(hist.iloc[-2]) if len(hist) > 1 else current
     just_turned_positive = previous <= 0 and current > 0

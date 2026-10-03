@@ -2,6 +2,8 @@
 구글 시트를 DB처럼 쓰는 저장소 모듈.
 
 - 추천 이력(recommendations): 오늘 이미 추천을 받았는지 판단하는 용도
+- 10시 급락 스캔(scans): 14시50분 매수 확인 때 다시 불러오는 용도(폰은 화면을 닫으면
+  기억이 사라지므로 시트에 저장)
 - 보유 종목(holdings): 매수/손절/익절 관리, "삭제"는 status를 closed로 바꾸는
   소프트 삭제 (이력을 남겨서 나중에 승률 통계 등에 쓸 수 있게)
 
@@ -24,15 +26,24 @@ numericise_ignore=["all"]로(gspread가 임의로 해석 못 하게) 막아뒀�
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
 import gspread
 import streamlit as st
 
 from app import config
+from app.config import now_kst, today_kst
 from app.secrets_util import get_secret
 
 RECOMMENDATION_HEADERS = ["date", "ticker", "name", "market_cap_rank", "created_at"]
+SCAN_HEADERS = [
+    "date",
+    "ticker",
+    "name",
+    "scan_price",
+    "scan_change_pct",
+    "kospi_change_pct",
+    "scanned_at",
+]
 HOLDING_HEADERS = [
     "id",
     "ticker",
@@ -100,29 +111,69 @@ def _holdings_ws():
     return _get_or_create_worksheet(config.SHEET_HOLDINGS, HOLDING_HEADERS)
 
 
+def _scans_ws():
+    return _get_or_create_worksheet(config.SHEET_SCANS, SCAN_HEADERS)
+
+
 # ---------- 추천 이력 ----------
 
 def has_recommendation_today() -> bool:
-    today = date.today().isoformat()
+    today = today_kst().isoformat()
     records = _recommendations_ws().get_all_records(numericise_ignore=["all"])
     return any(r.get("date") == today for r in records)
 
 
 def get_today_recommendation() -> list[dict]:
-    today = date.today().isoformat()
+    today = today_kst().isoformat()
     records = _recommendations_ws().get_all_records(numericise_ignore=["all"])
     return [r for r in records if r.get("date") == today]
 
 
 def save_recommendation(universe: list) -> None:
     """universe: app.universe.UniverseStock 리스트. 오늘 날짜로 한 번에 저장."""
-    today = date.today().isoformat()
+    today = today_kst().isoformat()
     ws = _recommendations_ws()
     rows = [
         [today, u.ticker, u.name, u.market_cap_rank, today]
         for u in universe
     ]
     ws.append_rows(rows, value_input_option="RAW")
+
+
+# ---------- 10시 급락 스캔 ----------
+
+def get_today_scan() -> list[dict]:
+    """오늘 가장 마지막으로 저장한 스캔 결과(같은 날 여러 번 스캔했으면 마지막 것만)."""
+    today = today_kst().isoformat()
+    records = [
+        r for r in _scans_ws().get_all_records(numericise_ignore=["all"])
+        if r.get("date") == today
+    ]
+    if not records:
+        return []
+    last = max(r.get("scanned_at", "") for r in records)
+    return [r for r in records if r.get("scanned_at") == last and r.get("ticker")]
+
+
+def has_scan_today() -> bool:
+    today = today_kst().isoformat()
+    return any(
+        r.get("date") == today
+        for r in _scans_ws().get_all_records(numericise_ignore=["all"])
+    )
+
+
+def save_scan(rows: list[dict], kospi_change_pct: float | None) -> None:
+    """rows: {"ticker","name","price","change_pct"} 목록. 급락 종목이 0개여도
+    "오늘 스캔했음"을 남기기 위해 빈 줄(ticker 없음) 하나를 저장한다."""
+    today = today_kst().isoformat()
+    scanned_at = now_kst().strftime("%Y-%m-%d %H:%M:%S")
+    kospi = "" if kospi_change_pct is None else kospi_change_pct
+    values = [
+        [today, r["ticker"], r["name"], r["price"], r["change_pct"], kospi, scanned_at]
+        for r in rows
+    ] or [[today, "", "", "", "", kospi, scanned_at]]
+    _scans_ws().append_rows(values, value_input_option="RAW")
 
 
 # ---------- 보유 종목 ----------
@@ -172,4 +223,4 @@ def soft_delete_holding(holding_id: str, sell_price: float | None = None) -> Non
     ws.update_cell(row, status_col, "closed")
     if sell_price is not None:
         ws.update_cell(row, sell_price_col, sell_price)
-    ws.update_cell(row, sell_date_col, date.today().isoformat())
+    ws.update_cell(row, sell_date_col, today_kst().isoformat())
