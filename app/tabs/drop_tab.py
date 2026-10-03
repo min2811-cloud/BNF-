@@ -69,6 +69,12 @@ def _indicator_columns(r: dict) -> dict:
     }
 
 
+def _rank_label(r: dict) -> str:
+    """시총순위 표시. 이 칸이 생기기 전에 저장된 스캔은 순위가 없어서 "-"."""
+    rank = r.get("market_cap_rank")
+    return f"{int(float(rank))}위" if rank not in ("", None) else "-"
+
+
 def _run_scan() -> None:
     stocks = universe.get_top_market_cap_universe()
     progress = st.progress(0.0, text="급락 종목 찾는 중...")
@@ -78,7 +84,8 @@ def _run_scan() -> None:
             cur = kis_client.get_current_price(s.ticker)
             if cur.change_pct <= config.DROP_THRESHOLD_PCT:
                 found.append(
-                    {"ticker": s.ticker, "name": s.name, "price": cur.price, "change_pct": cur.change_pct}
+                    {"ticker": s.ticker, "name": s.name, "price": cur.price, "change_pct": cur.change_pct,
+                     "market_cap_rank": s.market_cap_rank}
                 )
         except Exception:
             pass  # 개별 종목 조회 실패는 건너뛴다 (전체 스캔을 막지 않음)
@@ -127,9 +134,10 @@ def _render_scan_step() -> None:
     df["등락률"] = df["_chg"].map(lambda v: f"{v:+.1f}%")
     df["가격"] = pd.to_numeric(df["scan_price"]).map(lambda v: f"{v:,.0f}원")
     ind = pd.DataFrame([_indicator_columns(r) for r in rows], index=df.index)
+    df["시총순위"] = [_rank_label(r) for r in rows]
     df = pd.concat([df, ind], axis=1).rename(columns={"name": "종목명", "ticker": "종목코드"})
     st.dataframe(
-        df.sort_values("_chg")[["종목명", "종목코드", "등락률", "가격", "BNF조건", "이격도", "RSI", "MACD"]],
+        df.sort_values("_chg")[["시총순위", "종목명", "종목코드", "등락률", "가격", "BNF조건", "이격도", "RSI", "MACD"]],
         hide_index=True,
         width="stretch",
     )
@@ -154,6 +162,7 @@ def _run_buy_check(rows: list[dict]) -> None:
                     # 매수 대상만 지표를 지금 시점으로 다시 계산(장중에 값이 바뀌므로)
                     **(_indicators_for(r["ticker"]) if still_down else {}),
                     "ticker": r["ticker"],
+                    "market_cap_rank": r.get("market_cap_rank", ""),
                     "name": r["name"],
                     "scan_change_pct": float(r["scan_change_pct"]),
                     "price": cur.price,
@@ -213,6 +222,7 @@ def _render_buy_step() -> None:
             total += qty * t["price"]
             table.append(
                 {
+                    "시총순위": _rank_label(t),
                     "종목명": t["name"],
                     "지금 등락률": f"{t['change_pct']:+.1f}%",
                     "현재가": f"{t['price']:,.0f}원",
@@ -231,7 +241,7 @@ def _render_buy_step() -> None:
             st.dataframe(
                 pd.DataFrame(
                     [
-                        {"종목명": t["name"], "10시": f"{t['scan_change_pct']:+.1f}%", "지금": f"{t['change_pct']:+.1f}%"}
+                        {"시총순위": _rank_label(t), "종목명": t["name"], "10시": f"{t['scan_change_pct']:+.1f}%", "지금": f"{t['change_pct']:+.1f}%"}
                         for t in dropped
                     ]
                 ),

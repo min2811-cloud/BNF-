@@ -49,6 +49,7 @@ SCAN_HEADERS = [
     "macd_hist",
     "macd_just_turned",
     "bnf_all_ok",
+    "market_cap_rank",
 ]
 HOLDING_HEADERS = [
     "id",
@@ -183,9 +184,9 @@ def save_scan(rows: list[dict], kospi_change_pct: float | None) -> None:
     kospi = "" if kospi_change_pct is None else kospi_change_pct
     values = [
         [today, r["ticker"], r["name"], r["price"], r["change_pct"], kospi, scanned_at]
-        + [r.get(k, "") for k in ("disparity", "rsi", "macd_hist", "macd_just_turned", "bnf_all_ok")]
+        + [r.get(k, "") for k in ("disparity", "rsi", "macd_hist", "macd_just_turned", "bnf_all_ok", "market_cap_rank")]
         for r in rows
-    ] or [[today, "", "", "", "", kospi, scanned_at, "", "", "", "", ""]]
+    ] or [[today, "", "", "", "", kospi, scanned_at, "", "", "", "", "", ""]]
     _scans_ws().append_rows(values, value_input_option="RAW")
 
 
